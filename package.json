@@ -1,0 +1,13 @@
+{
+  "name": "eda-declarative-layout",
+  "version": "1.0.0",
+  "description": "Declarative component-driven schematic layout & wiring engine for EasyEDA Pro",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node examples/test-declarative-circuit.js"
+  },
+  "keywords": ["easyeda", "eda", "schematic", "declarative", "layout", "mcp"],
+  "author": "Antigravity & User",
+  "license": "Apache-2.0"
+}
