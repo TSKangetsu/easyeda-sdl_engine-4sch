@@ -273,7 +273,7 @@ export class SchCompiler {
         }
 
         // Helper: set component Designator (e.g. U1, C1) and Value/Name (e.g. 10uF)
-        async function applyComponentLabels(primId, designatorVal, valueLabel) {
+        async function applyComponentLabels(primId, designatorVal, valueLabel, labelOffsets) {
           try {
             const attrIds = await eda.sch_PrimitiveAttribute.getAllPrimitiveId(primId);
             if (!attrIds || attrIds.length === 0) return;
@@ -283,11 +283,24 @@ export class SchCompiler {
               if (!a) continue;
               const k = a.getState_Key ? a.getState_Key() : '';
               if (k === 'Designator' && designatorVal) {
-                await eda.sch_PrimitiveAttribute.modify(a.getState_PrimitiveId(), { value: String(designatorVal) });
+                const modProps = { value: String(designatorVal) };
+                if (labelOffsets?.designator) {
+                  const currX = a.getState_X ? a.getState_X() : 0;
+                  const currY = a.getState_Y ? a.getState_Y() : 0;
+                  if (labelOffsets.designator.dx !== undefined) modProps.x = currX + labelOffsets.designator.dx;
+                  if (labelOffsets.designator.dy !== undefined) modProps.y = currY + labelOffsets.designator.dy;
+                }
+                await eda.sch_PrimitiveAttribute.modify(a.getState_PrimitiveId(), modProps);
               } else if ((k === 'Name' || k === 'Value') && valueLabel !== undefined) {
                 const modProps = { value: String(valueLabel) };
-                // If it's a primary IC (U*), place model name slightly above to avoid crossing bottom pin wires
-                if (String(designatorVal).startsWith('U')) {
+                if (labelOffsets?.name) {
+                  const currX = a.getState_X ? a.getState_X() : 0;
+                  const currY = a.getState_Y ? a.getState_Y() : 0;
+                  if (labelOffsets.name.dx !== undefined) modProps.x = currX + labelOffsets.name.dx;
+                  if (labelOffsets.name.dy !== undefined) modProps.y = currY + labelOffsets.name.dy;
+                  if (labelOffsets.name.visible !== undefined) modProps.valueVisible = labelOffsets.name.visible;
+                } else if (String(designatorVal).startsWith('U')) {
+                  // If it's a primary IC (U*), place model name slightly above to avoid crossing bottom pin wires
                   const currY = a.getState_Y ? a.getState_Y() : 0;
                   const currX = a.getState_X ? a.getState_X() : 0;
                   if (currY && currX) {
@@ -336,13 +349,14 @@ export class SchCompiler {
             const posY = baseY + (compSpec.offset?.y || 0);
             const rot = compSpec.rotation || 0;
 
-            // Pass addIntoLibrary: false to avoid version conflict modal dialog
+            const addIntoBom = compSpec.addIntoBom !== undefined ? Boolean(compSpec.addIntoBom) : true;
+            const addIntoPcb = compSpec.addIntoPcb !== undefined ? Boolean(compSpec.addIntoPcb) : true;
             const comp = await eda.sch_PrimitiveComponent.create(
-              dev, posX, posY, undefined, rot, false, true, false
+              dev, posX, posY, undefined, rot, false, addIntoBom, addIntoPcb
             );
 
             const primId = comp.getState_PrimitiveId();
-            await applyComponentLabels(primId, compSpec.id, compSpec.value || compSpec.name);
+            await applyComponentLabels(primId, compSpec.id, compSpec.value || compSpec.name, compSpec.labelOffsets);
             const pinData = await getComponentPinMap(comp);
 
             results.components[compSpec.id] = {
@@ -460,11 +474,13 @@ export class SchCompiler {
               const estCenterX = currX + uDir.dx * (wireLen + 20);
               const estCenterY = currY + uDir.dy * (wireLen + 20);
 
+              const sAddIntoBom = sCompSpec.addIntoBom !== undefined ? Boolean(sCompSpec.addIntoBom) : true;
+              const sAddIntoPcb = sCompSpec.addIntoPcb !== undefined ? Boolean(sCompSpec.addIntoPcb) : true;
               const sComp = await eda.sch_PrimitiveComponent.create(
-                sDev, estCenterX, estCenterY, undefined, sRot, false, true, false
+                sDev, estCenterX, estCenterY, undefined, sRot, false, sAddIntoBom, sAddIntoPcb
               );
               const sPrimId = sComp.getState_PrimitiveId();
-              await applyComponentLabels(sPrimId, sCompSpec.id, sCompSpec.value || sCompSpec.name);
+              await applyComponentLabels(sPrimId, sCompSpec.id, sCompSpec.value || sCompSpec.name, sCompSpec.labelOffsets);
               const sPinData = await getComponentPinMap(sComp);
 
               // Sort pins along travel direction
@@ -618,11 +634,13 @@ export class SchCompiler {
               const compRot = branch.component.rotation !== undefined ? branch.component.rotation : 90;
               const estCenterY = topPinTargetY - 20;
 
+              const bAddIntoBom = branch.component.addIntoBom !== undefined ? Boolean(branch.component.addIntoBom) : true;
+              const bAddIntoPcb = branch.component.addIntoPcb !== undefined ? Boolean(branch.component.addIntoPcb) : true;
               const comp = await eda.sch_PrimitiveComponent.create(
-                dev, tapX, estCenterY, undefined, compRot, false, true, false
+                dev, tapX, estCenterY, undefined, compRot, false, bAddIntoBom, bAddIntoPcb
               );
               const primId = comp.getState_PrimitiveId();
-              await applyComponentLabels(primId, branch.component.id, branch.component.value || branch.component.name);
+              await applyComponentLabels(primId, branch.component.id, branch.component.value || branch.component.name, branch.component.labelOffsets);
               const pinData = await getComponentPinMap(comp);
 
               const sortedPins = [...pinData.pins].sort((a, b) => b.y - a.y);
@@ -681,11 +699,13 @@ export class SchCompiler {
               const topDev = await resolveDevice(div.topResistor);
               const topRot = div.topResistor.rotation !== undefined ? div.topResistor.rotation : 90;
               const estTopCenterY = divTapY - branchLen;
+              const tAddIntoBom = div.topResistor.addIntoBom !== undefined ? Boolean(div.topResistor.addIntoBom) : true;
+              const tAddIntoPcb = div.topResistor.addIntoPcb !== undefined ? Boolean(div.topResistor.addIntoPcb) : true;
               const topComp = await eda.sch_PrimitiveComponent.create(
-                topDev, divTapX, estTopCenterY, undefined, topRot, false, true, false
+                topDev, divTapX, estTopCenterY, undefined, topRot, false, tAddIntoBom, tAddIntoPcb
               );
               const topPrimId = topComp.getState_PrimitiveId();
-              await applyComponentLabels(topPrimId, div.topResistor.id, div.topResistor.value || div.topResistor.name);
+              await applyComponentLabels(topPrimId, div.topResistor.id, div.topResistor.value || div.topResistor.name, div.topResistor.labelOffsets);
               const topPinData = await getComponentPinMap(topComp);
               const topSorted = [...topPinData.pins].sort((a, b) => b.y - a.y);
               const topPin1 = topSorted[0]; // Higher Y
@@ -707,11 +727,13 @@ export class SchCompiler {
               const botRot = div.bottomResistor.rotation !== undefined ? div.bottomResistor.rotation : 90;
               const midY = topPin2.y;
               const estBotCenterY = midY - spacing;
+              const botAddIntoBom = div.bottomResistor.addIntoBom !== undefined ? Boolean(div.bottomResistor.addIntoBom) : true;
+              const botAddIntoPcb = div.bottomResistor.addIntoPcb !== undefined ? Boolean(div.bottomResistor.addIntoPcb) : true;
               const botComp = await eda.sch_PrimitiveComponent.create(
-                botDev, divTapX, estBotCenterY, undefined, botRot, false, true, false
+                botDev, divTapX, estBotCenterY, undefined, botRot, false, botAddIntoBom, botAddIntoPcb
               );
               const botPrimId = botComp.getState_PrimitiveId();
-              await applyComponentLabels(botPrimId, div.bottomResistor.id, div.bottomResistor.value || div.bottomResistor.name);
+              await applyComponentLabels(botPrimId, div.bottomResistor.id, div.bottomResistor.value || div.bottomResistor.name, div.bottomResistor.labelOffsets);
               const botPinData = await getComponentPinMap(botComp);
               const botSorted = [...botPinData.pins].sort((a, b) => b.y - a.y);
               const botPin1 = botSorted[0]; // Higher Y
@@ -839,6 +861,23 @@ export class SchCompiler {
               primitiveId: port ? port.getState_PrimitiveId() : null
             });
             updateBounds(portX, portY, 30);
+          }
+
+          // 6. No-Connect (NC) Pins on Components
+          for (const ncSpec of (mod.ncPins || mod.noConnectPins || [])) {
+            const comp = results.components[ncSpec.comp];
+            if (!comp || !comp.primitiveId) continue;
+            try {
+              const rawPins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(comp.primitiveId);
+              const targetPin = rawPins.find(p => {
+                const pNum = String(p.pinNumber || (p.getState_PinNumber ? p.getState_PinNumber() : '') || '');
+                const pName = String(p.pinName || (p.getState_PinName ? p.getState_PinName() : '') || '');
+                return pNum === String(ncSpec.pin) || pName === String(ncSpec.pin);
+              });
+              if (targetPin) {
+                await eda.sch_PrimitivePin.modify(targetPin, { noConnected: true });
+              }
+            } catch(e) {}
           }
         }
 
