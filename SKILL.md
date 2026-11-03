@@ -10,7 +10,35 @@ description: 嘉立创EDA专业版（EasyEDA Pro）声明式原理图布局与�
 
 ---
 
-## 一、 核心铁律（严禁违反）
+## 一、 标准化 5 步研发闭环流程（原理图是单一真实源）
+
+在任何电路研发与器件变更中，**原理图是全工程网络拓扑与器件定义的单一真实源（Single Source of Truth）**。严禁在 PCB 上直接进行飞线或修改封装！必须严格遵循以下 5 步研发闭环：
+
+```text
+[Step 1] 原理图器件与引脚探测 (Symbol & Pins Inspection)
+    │
+    ▼
+[Step 2] 声明式原理图编译与生成 (Schematic DSL -> Canvas Generation)
+    │
+    ▼
+[Step 3] 原理图到 PCB 的转换与同步 (eda.pcb_Document.importChanges)
+    │
+    ▼
+[Step 4] 同步后真实物理焊盘探测与 DSL 更新 (Probe Synced Pads -> PCB DSL)
+    │
+    ▼
+[Step 5] 声明式 PCB 编译、布线与闭环验证 (Compile -> Active DRC -> 2D/3D Visual Verification)
+```
+
+1. **Step 1: 原理图器件与引脚探测**：在修改电路或替换料号时，先查询符号的准确引脚编号与极性定义（例如公头与母头的针脚编号差异）。
+2. **Step 2: 声明式原理图编译生成**：更新 `circuitSpec` DSL，由 `SchCompiler` 编译并在 EasyEDA 原理图画布上生成图元，通过 DRC 验证并审查渲染截图。
+3. **Step 3: 原理图到 PCB 同步**：通过 `await eda.pcb_Document.importChanges(undefined, true)` 将器件更新与网表改动推送到 PCB。
+4. **Step 4: PCB 焊盘探测与 DSL 适配**：在 PCB 端检查器件物理焊盘编号，调整 PCB DSL 中的大电流连线与打孔。
+5. **Step 5: PCB 编译与双重自检**：执行 PCB 布局布线，确保 Active DRC = 0、飞线 = 0，并完成 2D/3D 视觉审查。
+
+---
+
+## 二、 原理图设计核心铁律（严禁违反）
 
 1. **严禁手算像素连线**：
    * 不要直接裸写 `eda.sch_PrimitiveWire.create([[x1,y1,x2,y2]])` 去猜引脚坐标。必须使用本项目的 `SchCompiler.compileToJs(circuitSpec)`，由编译器根据器件真实引脚坐标自动正交布线。
@@ -24,228 +52,138 @@ description: 嘉立创EDA专业版（EasyEDA Pro）声明式原理图布局与�
    * **不同引脚扇出时必须使用不同的 `dx`**（或沿引脚上下错开），防止多条折线的垂直段重叠在同一条垂线上导致短路！
 4. **单点网络命名与网络端口方向/极性（NetPort Polarity & Orientation）**：
    * 同一连通网络只需要**一个**网络名称来源（例如末端的 `Power` 符号、`Ground` 符号或 `NetPort` 端口）。
-   * EasyEDA 原生创建 `OUT` 与 `BI` 类型 NetPort 时默认将 `Name` 属性的 `valueVisible` 设为 `false`，导致图纸上端口名隐形。`SchCompiler` 内部在 `createPort` 中强制将 `valueVisible` 置为 `true`，确保所有网络端口文本清晰可见。
+   * `SchCompiler` 内部在 `createPort` 中强制将 `valueVisible` 置为 `true`，确保所有网络端口文本清晰可见。
    * **端口固有极性与四向正交旋转规律（NetPort Polarity & 4-Direction Rules）**:
-     * OUT 与 BI 端口：
-       * 水平向右（direction: 'right'）：引脚在左，本体朝右（+X），标准 otation: 0。
-       * 水平向左（direction: 'left'）：引脚在右，本体朝左（-X），标准 otation: 180。
-       * 垂直向上（direction: 'up'）：引脚在下，本体朝上（+Y），标准 otation: 270。
-       * 垂直向下（direction: 'down'）：引脚在上，本体朝下（-Y），标准 otation: 90。
-     * IN 端口（其引脚位于箭头尖端，物理极性与 OUT/BI 正好相差 180°）：
-       * 水平向左（direction: 'left'）：引脚在右（指向电路内部），本体与文本向左延伸，标准 otation: 0。
-       * 水平向右（direction: 'right'）：引脚在左（指向电路内部），本体与文本向右延伸，标准 otation: 180。
-       * 垂直向上（direction: 'up'）：引脚在下（指向电路内部），本体与文本向上延伸，标准 otation: 90。
-       * 垂直向下（direction: 'down'）：引脚在上（指向电路内部），本体与文本向下延伸，标准 otation: 270。
-     * SchCompiler 内部会自动根据 direction 与 portType 计算标准旋转角度；若用户显式传入了 180° 反向的角度（如向左的 IN 端口误传了 otation: 180，或向上的 OUT 端口误传了 otation: 90），编译器会自动矫正，彻底杜绝导线穿身（wire piercing）与文本重叠。
-   * 同时内置针对新生成导线的 `hideRedundantWireLabels()` 机制，自动隐藏导线图元自带的多余 `Name` 属性，消除图纸杂乱。
+     * `OUT` 与 `BI` 端口：
+       * 水平向右（`direction: 'right'`）：引脚在左，本体朝右（+X），标准 `rotation: 0`。
+       * 水平向左（`direction: 'left'`）：引脚在右，本体朝左（-X），标准 `rotation: 180`。
+       * 垂直向上（`direction: 'up'`）：引脚在下，本体朝上（+Y），标准 `rotation: 270`。
+       * 垂直向下（`direction: 'down'`）：引脚在上，本体朝下（-Y），标准 `rotation: 90`。
+     * `IN` 端口（其引脚位于箭头尖端，物理极性与 OUT/BI 正好相差 180°）：
+       * 水平向左（`direction: 'left'`）：引脚在右（指向电路内部），本体与文本向左延伸，标准 `rotation: 0`。
+       * 水平向右（`direction: 'right'`）：引脚在左（指向电路内部），本体与文本向右延伸，标准 `rotation: 180`。
+       * 垂直向上（`direction: 'up'`）：引脚在下（指向电路内部），本体与文本向上延伸，标准 `rotation: 90`。
+       * 垂直向下（`direction: 'down'`）：引脚在上（指向电路内部），本体与文本向下延伸，标准 `rotation: 270`。
+     * `SchCompiler` 内部会自动根据 `direction` 与 `portType` 计算标准旋转角度；若传入反向角度，编译器会自动矫正，杜绝导线穿身（wire piercing）与文本重叠。
+   * 内置 `hideRedundantWireLabels()` 机制，自动隐藏导线自带的冗余标签。
 5. **器件库防挂起安全机制（Project Library Priority & Modal Auto-Dismiss）**：
-   * 嘉立创EDA在重复放置工程库已存在的器件时，会弹出 `<div id="noticeCompVUpdatedDlg">` 模态对话框（“工程库存在其他版本，请选择你需要进行的操作”），阻塞 API Promise 导致 60s 报错超时。
-   * `SchCompiler` 内置了 50ms DOM 自动应答监听器，并在 `resolveDevice` 中优先检索当前工程库（`eda.lib_LibrariesList.getProjectLibraryUuid()`），同时在创建时传入 `addIntoLibrary: false`，彻底根除弹窗挂起问题。
+   * 嘉立创 EDA 在重复放置工程库已存在的器件时，会弹出 `<div id="noticeCompVUpdatedDlg">` 对话框，阻塞 API Promise 导致 60s 超时。
+   * `SchCompiler` 内置 50ms DOM 自动应答监听器，并在 `resolveDevice` 中优先检索当前工程库（`eda.lib_LibrariesList.getProjectLibraryUuid()`），在创建时传入 `addIntoLibrary: false`，杜绝弹窗挂起。
 6. **强制视觉自检闭环（Render & Verify）**：
-   * 每次生成或修改原理图后，**必须**检查返回的 `results.screenshotBase64` 导出的 PNG 图像（如 `test/output-schematic.png` 或 `test/mp9943-generated-schematic.png`），并用 `view_file` 亲自审查：**无斜线、无意外红点短路（Accidental Junctions）、无文字重叠、无悬空引脚**后，才算任务完成。
+   * 每次生成或修改原理图后，**必须**检查返回的 `results.screenshotBase64` 导出的 PNG 图像，并用 `view_file` 亲自审查：**无斜线、无意外红点短路（Accidental Junctions）、无文字重叠、无悬空引脚**。
 
 ---
 
-## 二、 前端组件化布局模型（Layout Mental Model）
+## 三、 抽象原理图组件化拓扑模型 (Mental Model)
 
-在编写声明式 `circuitSpec` 时，请用前端组件化的层次化结构组织电路：
+在编写声明式 `circuitSpec` 时，按功能模块分块构建抽象电路：
 
 ```text
-               VIN (Power Flag)
-                  │
-   (VIN 轨) ──────┴──────┬───────────┐ (jog 向右140向上105扇出，避开PG)
-   direction:'right'     │           │
-                       [CV4]       [Pin 7: IN]
-                       22uF          │
-                         │       [ U8: MP9943 ]
-                         ▼           │
-                       ╶─── GND    [Pin 6: SW]
-                                     │
-   (SW 轨) ──────────────┬───────────┘ (jog 向右60向下95扇出)
-   direction:'right'     │
-                       [LV1] 10uH (串联电感 series)
-                         │
-                      (5V 轨) ──────┬──────────────┬──────────────┬──────── 5V (Flag)
-                                    │              │              │
-                                  [CV5]          [CV6]          [V2] 43k (分压上臂)
-                                  22uF           22uF             │
-                                    │              │              ├──── [FB_TAP] Port
-                                    ▼              ▼              │
-                                  ╶─── GND       ╶─── GND       [V3] 7.5k (分压下臂)
-                                                                  │
-                                                                  ▼
-                                                                ╶─── GND
+              VCC (Power Flag)
+                 │
+ (供电轨) ───────┴──────┬───────────┐ (jog 向上扇出，避开相邻引脚)
+ direction:'right'      │           │
+                      [C_DEC]     [Pin 7: VCC]
+                       10uF         │
+                        │       [ U_MAIN: 核心芯片/模块 ]
+                        ▼           │
+                      ╶─── GND    [Pin 6: OUT]
+                                    │
+ (输出轨) ──────────────┬───────────┘ (jog 向下扇出)
+ direction:'right'      │
+                      [L_FILTER] (串联器件 series)
+                        │
+                     (滤波轨) ──────┬──────────────┬──────── VOUT (Flag)
+                                    │              │
+                                  [C_OUT]        [R_TOP] (分压上臂)
+                                   22uF            │
+                                    │              ├──── [FB] Port (抽头端口)
+                                    ▼              │
+                                  ╶─── GND       [R_BOT] (分压下臂)
+                                                   │
+                                                   ▼
+                                                 ╶─── GND
 ```
 
-1. **核心芯片定位（`primaryComponents`）**：
-   * 芯片位于模块基准原点 `origin: { x, y }`。
-2. **多路走线扇出折线（`rails[].jog`）**：
-   * 从引脚先横向伸出 `dx`，再纵向拐弯 `dy`，避开周围紧挨的引脚。
-   * **严密计算高度分层**：同侧引脚向下扇出时，越靠下的引脚向下折落的高度必须越深，且垂直下折点必须靠内（靠近芯片），外侧上部引线在其上方水平通过，从而实现完全平面无交叉走线（Zero-Crossing Planar Routing）。
-3. **主干电源轨与串联器件（`rails[].series`）**：
-   * 沿走线方向串入二端器件（如功率电感 `LV1`、自举电阻 `V6`、自举电容 `CV2`），并可在器件前后插入网络端口（如 `tapBefore: { port: { net: 'SW' } }`）。
-4. **并联滤波旁路支路（`rails[].branches`）**：
-   * 沿电源轨指定距离（`atDistance`）向下打 T 型节点，垂直挂接电容并直达 `GND`。
-5. **反馈分压网络（`rails[].divider`）**：
-   * 自动生成上拉电阻 -> 中间抽头输出 `NetPort` -> 下拉电阻 -> `GND` 的经典分压拓扑。
-6. **接地与端口（`groundPins` / `rail.port` / `rail.flag`）**：
-   * 芯片与支路的接地符号、网络标号与端口均由编译器自动对接和对齐。
+1. **核心芯片定位（`primaryComponents`）**：芯片位于模块基准原点 `origin: { x, y }`。
+2. **多路走线扇出折线（`rails[].jog`）**：从引脚横向引出 `dx`，再纵向拐弯 `dy`，高度分层，避开相邻并排引线。
+3. **主干电源轨与串联器件（`rails[].series`）**：沿走线方向串入二端器件（如串联滤波电感、电阻、隔直电容）。
+4. **并联滤波旁路支路（`rails[].branches`）**：沿主干轨指定距离打 T 型节点，垂直挂接去耦电容并直达 `GND`。
+5. **反馈分压网络（`rails[].divider`）**：自动生成分压上臂电阻 -> 中间抽头端口 -> 分压下臂电阻 -> `GND`。
+6. **接地与端口（`groundPins` / `rail.port` / `rail.flag`）**：符号、标号与端口均由编译器自动对接和对齐。
+7. **未连接引脚声明（`ncPins`）**：机械引脚或悬空引脚声明为 `ncPins`，自动添加打叉 NC 符号，防止 DRC 报未连接悬空引脚。
 
 ---
 
-## 三、 声明式 DSL Schema 完整规范 (`circuitSpec`)
+## 四、 抽象声明式 DSL Schema 规范 (`circuitSpec`)
 
 ```javascript
 const circuitSpec = {
-  name: 'MP9943_Buck_Converter',
-  renderRegion: { minX: 2550, minY: 1200, maxX: 3600, maxY: 1800 },
-  renderWidth: 1600,
+  name: 'Declarative_Schematic_Example',
+  renderRegion: { minX: 100, minY: 100, maxX: 1200, maxY: 900 },
+  renderWidth: 2000,
   modules: [
     {
-      name: 'MP9943_Power_Stage',
-      origin: { x: 3000, y: 1600 },
+      name: 'Power_Supply_Module',
+      origin: { x: 400, y: 500 },
 
-      // 1. 核心芯片器件
+      // 1. 核心器件
       primaryComponents: [
         {
-          id: 'U8',
-          keyword: 'MP9943GQ-Z',   // 库搜索关键词（优先匹配工程库）
-          name: 'MP9943GQ-Z',      // 参数值
+          id: 'U1',
+          keyword: 'CHIP_PART_NUMBER', // 库检索关键词 (优先工程库)
+          lcsc: 'C123456',              // 建议提供确切 LCSC 编号
+          name: 'CHIP_NAME',
           offset: { x: 0, y: 0 },
-          rotation: 0
+          rotation: 0,
+          labelOffsets: {
+            designator: { dx: 15, dy: 5 },
+            name: { dx: 15, dy: 0 }
+          }
         }
       ],
 
       // 2. 引脚主干轨与扇出拓扑
       rails: [
-        // Pin 7 (IN) -> 向右140越过PG端口后向上105 -> VIN 轨 (并联滤波 CV4 22uF, CV3 100nF)
+        // 供电输入轨 (并联去耦电容)
         {
-          name: 'VIN_INPUT_RAIL',
-          from: { comp: 'U8', pin: '7' },
-          direction: 'right',
-          jog: { dx: 140, dy: 105 },
-          length: 220,
-          flag: { type: 'Power', net: 'VIN', rotation: 0 },
+          name: 'VCC_INPUT_RAIL',
+          from: { comp: 'U1', pin: '1' },
+          direction: 'left',
+          jog: { dx: -60, dy: 50 },
+          length: 150,
+          flag: { type: 'Power', net: 'VCC_3V3', rotation: 0 },
           branches: [
             {
-              atDistance: 60,
-              component: { id: 'CV4', keyword: 'CL10A', value: '22uF', rotation: 90 },
-              branchLength: 50,
-              groundStub: 25
-            },
-            {
-              atDistance: 140,
-              component: { id: 'CV3', keyword: 'CL10A', value: '100nF', rotation: 90 },
-              branchLength: 50,
+              atDistance: 50,
+              component: { id: 'C1', keyword: '0603_CAP', value: '10uF', rotation: 90 },
+              branchLength: 40,
               groundStub: 25
             }
           ]
         },
 
-        // Pin 8 (PG) -> NetPort 'PG'
+        // 信号输出轨 (串联电阻后输出 NetPort)
         {
-          name: 'PG_RAIL',
-          from: { comp: 'U8', pin: '8' },
+          name: 'SIG_OUT_RAIL',
+          from: { comp: 'U1', pin: '2' },
           direction: 'right',
-          length: 50,
-          port: { portType: 'OUT', net: 'PG', rotation: 0 }
-        },
-
-        // Pin 6 (SW) -> 向右60向下95 -> SW 端口 -> 串联电感 LV1 -> 5V 输出轨 + CV5, CV6 + 反馈分压器
-        {
-          name: 'VOUT_5V_RAIL',
-          from: { comp: 'U8', pin: '6' },
-          direction: 'right',
-          jog: { dx: 60, dy: -95 },
+          length: 100,
           series: [
-            {
-              component: { id: 'LV1', keyword: 'TMPA0402SP-100MN', value: '10uH', rotation: 0 },
-              wireLength: 35,
-              tapBefore: {
-                port: { portType: 'BI', net: 'SW', direction: 'left', stubLength: 40, rotation: 180 }
-              }
-            }
+            { component: { id: 'R1', keyword: '0603_RES', value: '22Ω', rotation: 0 }, wireLength: 30 }
           ],
-          length: 290,
-          flag: { type: 'Power', net: '5V', rotation: 0 },
-          branches: [
-            {
-              atDistance: 60,
-              component: { id: 'CV5', keyword: 'CL10A', value: '22uF', rotation: 90 },
-              branchLength: 50,
-              groundStub: 25
-            },
-            {
-              atDistance: 135,
-              component: { id: 'CV6', keyword: 'CL10A', value: '22uF', rotation: 90 },
-              branchLength: 50,
-              groundStub: 25
-            }
-          ],
-          divider: {
-            atDistance: 215,
-            topResistor: { id: 'V2', keyword: 'RT0603', value: '43kΩ', rotation: 90 },
-            bottomResistor: { id: 'V3', keyword: 'RT0603', value: '7.5kΩ', rotation: 90 },
-            branchLength: 45,
-            dividerSpacing: 45,
-            groundStub: 25,
-            tapPort: { portType: 'OUT', net: 'FB_TAP', direction: 'right', stubLength: 35, rotation: 0 }
-          }
-        },
-
-        // Pin 4 (BST) -> 向下深扇出至 y=1460 -> 串联电阻 V6 (20Ω) -> 串联电容 CV2 (100nF) -> NetPort 'SW'
-        {
-          name: 'BST_RAIL',
-          from: { comp: 'U8', pin: '4' },
-          direction: 'left',
-          jog: { dx: -20, dy: -125 },
-          series: [
-            { component: { id: 'V6', keyword: 'RT0603', value: '20Ω', rotation: 0 }, wireLength: 30 },
-            { component: { id: 'CV2', keyword: 'CL10A', value: '100nF', rotation: 0 }, wireLength: 30 }
-          ],
-          port: { portType: 'BI', net: 'SW', direction: 'left', stubLength: 60, rotation: 180 }
-        },
-
-        // Pin 3 (EN/SYNC) -> 向下扇出至 y=1520 (在BST上方) -> 串联电阻 V5 (1MΩ) -> Power Flag 'VIN'
-        {
-          name: 'EN_RAIL',
-          from: { comp: 'U8', pin: '3' },
-          direction: 'left',
-          jog: { dx: -45, dy: -75 },
-          series: [
-            { component: { id: 'V5', keyword: 'RT0603', value: '1MΩ', rotation: 0 }, wireLength: 30 }
-          ],
-          flag: { type: 'Power', net: 'VIN', direction: 'left', stubLength: 30, rotation: 0 }
-        },
-
-        // Pin 2 (VCC) -> 水平向左串联滤波电容 CV1 (10uF) 直通向下接地符号
-        {
-          name: 'VCC_RAIL',
-          from: { comp: 'U8', pin: '2' },
-          direction: 'left',
-          series: [
-            { component: { id: 'CV1', keyword: 'CL10A', value: '10uF', rotation: 0 }, wireLength: 30 }
-          ],
-          length: 40,
-          flag: { type: 'Ground', net: 'GND', direction: 'down', stubLength: 25, rotation: 0 }
-        },
-
-        // Pin 1 (FB) -> 向上扇出至 y=1690 -> 串联电阻 V1 (51kΩ) -> NetPort 'FB_TAP'
-        {
-          name: 'FB_RAIL',
-          from: { comp: 'U8', pin: '1' },
-          direction: 'left',
-          jog: { dx: -40, dy: 75 },
-          series: [
-            { component: { id: 'V1', keyword: 'RT0603', value: '51kΩ', rotation: 0 }, wireLength: 30 }
-          ],
-          port: { portType: 'IN', net: 'FB_TAP', direction: 'left', stubLength: 90, rotation: 0 }
+          port: { portType: 'OUT', net: 'TX_DATA', direction: 'right' }
         }
       ],
 
-      // 3. 芯片直连接地引脚
+      // 3. 直连接地引脚
       groundPins: [
-        { comp: 'U8', pin: '5', direction: 'right', stubLength: 30, rotation: 270 }
+        { comp: 'U1', pin: 'GND_PIN', direction: 'down', stubLength: 25, rotation: 0 }
+      ],
+
+      // 4. 未连接引脚 (自动加 NC 符号)
+      ncPins: [
+        { comp: 'U1', pin: 'NC_PIN' }
       ]
     }
   ]
@@ -254,7 +192,7 @@ const circuitSpec = {
 
 ---
 
-## 四、 编译与执行范式 (Code Execution)
+## 五、 编译与执行范式 (Code Execution)
 
 ```javascript
 import { LcedaBridge } from '../src/bridge/lceda-bridge.js';
@@ -270,31 +208,30 @@ const compiledJs = SchCompiler.compileToJs(circuitSpec);
 // 2. 注入 EasyEDA 会话执行
 const res = await bridge.invoke(session.sessionId, compiledJs);
 
-if (res.ok && res.value?.ok) {
-  const r = res.value.results;
-  console.log(`生成成功! 器件数: ${Object.keys(r.components).length}, 导线条数: ${r.wires.length}`);
-  
-  // 3. 保存高清截图
-  if (r.screenshotBase64) {
-    fs.writeFileSync('test/mp9943-generated-schematic.png', Buffer.from(r.screenshotBase64, 'base64'));
-  }
+if (!res.ok || !res.value?.ok) {
+  console.error('原理图生成失败:', res.value?.error || res.error);
+  process.exit(1);
+}
+
+const r = res.value.results;
+console.log(`原理图生成成功! 器件数: ${Object.keys(r.components).length}, 导线条数: ${r.wires.length}`);
+
+// 3. 闭环截图自检
+if (r.screenshotBase64) {
+  fs.writeFileSync('test/output-schematic.png', Buffer.from(r.screenshotBase64, 'base64'));
 }
 ```
 
 ---
 
-## 五、 视觉自检清单 (QA Checklist)
+## 六、 视觉审查清单 (QA Checklist)
 
-生成截图后，使用多模态工具（`view_file`）检查图像并逐项核对：
+生成截图后，使用 `view_file` 检查导出的原理图图像：
 1. **电源/接地旗标方向**：
-   * 所有 `VIN`、`5V`、`3V3` 等电源符号必须朝上（`rotation: 0`）。
-   * 垂直下沉的 `GND` 必须朝下（`rotation: 0`）；水平延伸的 `GND` 必须向左或向右朝向末端。
-2. **走线与引脚间隙**：
-   * 芯片同一侧的并排引脚，引线是否通过 `jog` 错开高度？
-   * 各支路器件（电容、电阻、端口）之间是否有至少 30 mil 的空间，杜绝文字重叠。
-   * 网络端口（`NetPort`）引出线长度是否充足（至少 60~80 mil），避免端口文本直接覆盖相连二端器件。
-3. **闭环连通性**：
-   * 自举电容 `BST` 端的 `NetPort SW` 与电感前端的 `NetPort SW` 网络名必须严格一致。
-   * 分压网络抽头 `FB_TAP` 与芯片反馈引脚 `FB` 端的 `NetPort FB_TAP` 必须严格一致。
-4. **零意外短路（Zero Accidental Junctions）**：
-   * 审查导线拐角与水平主干之间绝不能出现由于线距不足或折弯交叠产生的意外红点连接（Red Junction Dots）。
+   * 所有电源符号（`VCC`, `VIN`, `5V` 等）必须垂直向上（`rotation: 0`）。
+   * 垂直下沉的 `GND` 必须朝下（`rotation: 0`）；水平延伸的 `GND` 必须向外朝向末端。
+2. **走线间隙与文字防重叠**：
+   * 同侧并排引脚必须通过 `jog` 错开 Y 轴高度。
+   * 导线拐弯与器件之间必须留有充足净距，严禁文本重叠。
+3. **零意外短路（Zero Accidental Junctions）**：
+   * 导线十字交叉处绝不能出现意外连接红点。

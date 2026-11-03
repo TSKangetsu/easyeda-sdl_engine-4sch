@@ -241,16 +241,18 @@ async function main() {
         ]
       },
 
-      // Module 3: XT60 Horizontal Female Power Input (XT60PW-F, C428722)
+      // Module 3: XT60 Horizontal Male Power Input (XT60PW-M, C98732)
+      // Note: C428721 is XT30UPB-M (vertical 15A); C98732 is the exact horizontal male XT60 (XT60PW-M, datasheet C428722).
       {
         name: 'XT60_Power_Stage',
         origin: { x: 200, y: 170 },
         primaryComponents: [
           {
             id: 'XT60',
-            lcsc: 'C428722',
-            keyword: 'XT60PW-F',
-            name: 'XT60PW-F',
+            lcsc: 'C98732',
+            keyword: 'XT60PW-M',
+            name: 'XT60PW-M',
+            comment: 'XT60PW-M (公头)',
             offset: { x: 0, y: 0 },
             rotation: 0,
             labelOffsets: {
@@ -262,22 +264,22 @@ async function main() {
         rails: [
           {
             name: 'XT60_VIN_RAIL',
-            from: { comp: 'XT60', pin: '3' },
+            from: { comp: 'XT60', pin: '2' },
             direction: 'left',
-            jog: { dx: -45, dy: 25 },
+            jog: { dx: -45, dy: 30 },
             flag: { type: 'Power', net: 'VIN', rotation: 0 }
           },
           {
             name: 'XT60_GND_RAIL',
-            from: { comp: 'XT60', pin: '4' },
+            from: { comp: 'XT60', pin: '1' },
             direction: 'left',
-            jog: { dx: -25, dy: -25 },
+            jog: { dx: -25, dy: -30 },
             flag: { type: 'Ground', net: 'GND', rotation: 0 }
           }
         ],
         ncPins: [
-          { comp: 'XT60', pin: '1' },
-          { comp: 'XT60', pin: '2' }
+          { comp: 'XT60', pin: '3' },
+          { comp: 'XT60', pin: '4' }
         ]
       },
 

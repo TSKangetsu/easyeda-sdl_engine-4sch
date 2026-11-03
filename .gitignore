@@ -1,3 +1,13 @@
 node_modules/
 test/
 *.log
+*.png
+*.jpg
+check-*
+probe-*
+inspect-*
+query-*
+get-*
+search-*
+verify-*
+analyze-*
